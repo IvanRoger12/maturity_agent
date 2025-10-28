@@ -1,7 +1,18 @@
 [theme]
-base="light"
-primaryColor="#0ea5e9"
-backgroundColor="#ffffff"
-secondaryBackgroundColor="#f5f7fb"
-textColor="#111827"
+# Thème Dark Mode "SaaS / Tech"
+base="dark"
+
+# Couleur d'accentuation (violet)
+primaryColor="#A78BFA" 
+
+# Fond principal (très sombre)
+backgroundColor="#0F172A" # Slate 900
+
+# Fond secondaire (cartes, sidebar, etc.)
+secondaryBackgroundColor="#1E293B" # Slate 800
+
+# Couleur de texte principale
+textColor="#F8FAFC" # Slate 50
+
+# Police
 font="sans serif"
