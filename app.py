@@ -1,24 +1,15 @@
-# app.py — MaturityAgent PRO (Ultimate v10)
+# app.py — MaturityAgent PRO (Ultimate v9, IA enabled)
 # ------------------------------------------------------------
-# Nouveautés v10 :
-# 1) Module “Maturité SQL” (Postgres/BigQuery/Snowflake/…)
-# 2) Export PDF direct (WeasyPrint prioritaire, fallback pdfkit)
-# 3) IA OpenAI intégrée (lecture clé via Secrets/ENV + prompts + rendu Markdown)
-#
-# Quickstart:
-#   pip install streamlit pandas numpy plotly openpyxl
-#   # IA (facultatif)
-#   pip install openai
-#   # Export PDF (choisir 1 voie)
-#   pip install weasyprint tinycss2 cssselect2   # (recommandé)
-#   # OU
-#   pip install pdfkit   # + installer wkhtmltopdf binaire
-#   streamlit run app.py
+# Enhancements:
+# 1) SQL Maturity module (Postgres/BigQuery/Snowflake) with metrics
+# 2) Direct PDF export (WeasyPrint -> pdfkit) with graceful fallback
+# 3) ✅ OpenAI integration (executive summary + roadmap) using OPENAI_API_KEY
 # ------------------------------------------------------------
 
 import os
+import io
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Optional, Dict
 
 import streamlit as st
 import pandas as pd
@@ -26,10 +17,10 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 
-# ============== PDF export helpers (lazy) ==============
+# ============== Optional PDF libs (loaded lazily later) ==============
 def try_export_pdf(html_str: str) -> Optional[bytes]:
-    """Tente d'exporter HTML → PDF. Renvoie bytes si OK, sinon None."""
-    # 1) WeasyPrint
+    """Try exporting HTML to PDF. Prefer WeasyPrint; otherwise try pdfkit. Return bytes or None."""
+    # Try WeasyPrint
     try:
         from weasyprint import HTML, CSS  # type: ignore
         css = CSS(string="""
@@ -45,7 +36,7 @@ def try_export_pdf(html_str: str) -> Optional[bytes]:
     except Exception:
         pass
 
-    # 2) pdfkit (wkhtmltopdf requis côté OS)
+    # Try pdfkit (requires wkhtmltopdf system binary)
     try:
         import pdfkit  # type: ignore
         pdf_bytes = pdfkit.from_string(html_str, False)
@@ -55,78 +46,6 @@ def try_export_pdf(html_str: str) -> Optional[bytes]:
 
     return None
 
-def md_to_html(md_text: str) -> str:
-    """MD très simple → HTML minimal ; pour PDF. Remplacer par markdown lib si besoin."""
-    esc = (md_text
-           .replace("&","&amp;")
-           .replace("<","&lt;")
-           .replace(">","&gt;"))
-    return f"""
-<!doctype html><html><head><meta charset="utf-8">
-<title>Maturity Report</title></head>
-<body>
-<pre style="white-space: pre-wrap; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Arial; font-size:14px; color:#111827;">
-{esc}
-</pre>
-</body></html>
-"""
-
-# ============== OpenAI helper (unique) ==============
-def call_openai_summary_and_roadmap(api_key: str, model: str, ctx_text: str) -> Tuple[str, str]:
-    """
-    Retourne: (synthèse exécutive MD, feuille de route MD).
-    Lève une Exception si lib absente, clé invalide, modèle non trouvé, etc.
-    """
-    if not api_key:
-        raise ValueError("Clé OpenAI absente")
-
-    try:
-        from openai import OpenAI  # type: ignore
-    except Exception as e:
-        raise RuntimeError("La librairie 'openai' n'est pas installée. Faites: pip install openai") from e
-
-    client = OpenAI(api_key=api_key)
-
-    system_msg = (
-        "You are a world-class strategic consultant for C-level. "
-        "Be concise, bold, action-oriented. Use Markdown with headings and bullet lists."
-    )
-
-    # 1) Synthèse
-    prompt_sum = (
-        "Rédige une **Synthèse Exécutive** percutante (Markdown) pour un Comité de Direction :\n"
-        "- Rappelle le score global.\n- 3 forces clés.\n- 3 risques/priorités.\n"
-        "Texte directement exploitable (ne cite pas la source ni le mot 'contexte').\n\n"
-        f"CONTEXTE:\n{ctx_text}\n"
-    )
-    sum_resp = client.chat.completions.create(
-        model=model,
-        temperature=0.5,
-        max_tokens=1200,
-        messages=[{"role":"system","content":system_msg},
-                  {"role":"user","content":prompt_sum}]
-    )
-    summary_md = (sum_resp.choices[0].message.content or "").strip()
-
-    # 2) Feuille de route
-    prompt_map = (
-        "Crée une **Feuille de Route Stratégique** (Markdown) en 3 horizons :\n"
-        "### 90 jours (Quick Wins) – 3 actions SMART\n"
-        "### 6 mois (Fondations) – 3 actions SMART\n"
-        "### 12 mois (Scale/Excellence) – 2 à 3 actions SMART\n"
-        "Chaque action = [Objectif SMART] – [Livrable] – [Impact]. Ne cite pas la source.\n\n"
-        f"CONTEXTE:\n{ctx_text}\n"
-    )
-    map_resp = client.chat.completions.create(
-        model=model,
-        temperature=0.5,
-        max_tokens=1400,
-        messages=[{"role":"system","content":system_msg},
-                  {"role":"user","content":prompt_map}]
-    )
-    roadmap_md = (map_resp.choices[0].message.content or "").strip()
-
-    return summary_md, roadmap_md
 
 # =========================
 # Configuration
@@ -139,7 +58,7 @@ st.set_page_config(
 )
 
 # =========================
-# Textes multilingues
+# Textes multilingues COMPLETS
 # =========================
 LANGS = {
     "en": {
@@ -167,6 +86,7 @@ LANGS = {
         "section_report": "📝 Executive Report (Board-Ready)",
         "section_roi": "💰 Business Impact Calculator",
         "section_linkedin": "🔗 Viral LinkedIn Post Generator",
+        "section_demo": "🎬 Product Demo & Use Cases",
         "benchmark_title": "📈 Industry Benchmark Analysis",
         "benchmark_vs": "vs. Industry Average",
         "benchmark_rank": "Your Percentile Rank",
@@ -213,7 +133,10 @@ LANGS = {
         "contact_github": "💻 View Source Code (GitHub)",
         "pdf_missing": "PDF engine is not installed. Install one:\n- pip install weasyprint tinycss2 cssselect2 (recommended), or\n- pip install pdfkit and install wkhtmltopdf binary on your system.",
         "sql_section_title": "🗄️ SQL Maturity (Optional Module)",
-        "sql_note": "This module scores your SQL/data warehouse practice (performance, design, ops)."
+        "sql_note": "This module scores your SQL/data warehouse practice (performance, design, ops).",
+        "ai_info": "🔒 Manual mode — enable AI in the sidebar (and set OPENAI_API_KEY) for an executive summary & roadmap.",
+        "ai_summary_title": "🧠 Executive Summary (AI)",
+        "ai_roadmap_title": "🧭 AI Roadmap"
     },
     "fr": {
         "hero_title": "🚀 MaturityAgent PRO",
@@ -240,6 +163,7 @@ LANGS = {
         "section_report": "📝 Rapport Exécutif (Board-Ready)",
         "section_roi": "💰 Calculateur d'Impact Business",
         "section_linkedin": "🔗 Générateur de Post LinkedIn Viral",
+        "section_demo": "🎬 Démo Produit & Cas d'Usage",
         "benchmark_title": "📈 Analyse Benchmark Sectoriel",
         "benchmark_vs": "vs. Moyenne du Secteur",
         "benchmark_rank": "Votre Percentile",
@@ -286,7 +210,10 @@ LANGS = {
         "contact_github": "💻 Code Source (GitHub)",
         "pdf_missing": "Aucun moteur PDF installé. Installez l’un des deux :\n- pip install weasyprint tinycss2 cssselect2 (recommandé), ou\n- pip install pdfkit + binaire wkhtmltopdf.",
         "sql_section_title": "🗄️ Maturité SQL (Module optionnel)",
-        "sql_note": "Ce module score votre pratique SQL/Entrepôt (perf, design, ops)."
+        "sql_note": "Ce module score votre pratique SQL/Entrepôt (perf, design, ops).",
+        "ai_info": "🔒 Mode manuel — activez l’IA dans la barre latérale (et OPENAI_API_KEY) pour une synthèse exécutive et une roadmap.",
+        "ai_summary_title": "🧠 Synthèse Exécutive (IA)",
+        "ai_roadmap_title": "🧭 Feuille de Route IA"
     }
 }
 
@@ -307,14 +234,14 @@ def set_lang(new_lang: str):
 T = LANGS[st.session_state.current_lang]
 
 # =========================
-# HERO SECTION (couleur premium dégradé bleu→violet)
+# HERO SECTION
 # =========================
 st.markdown(f"""
 <div style="
-background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 45%, #a855f7 100%);
+background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 padding: 64px 28px; border-radius: 20px; text-align: center; color: white;
-box-shadow: 0 25px 70px rgba(99,102,241,0.28);">
-  <div style="font-size:56px;font-weight:900;margin:0 0 6px 0;letter-spacing:-0.5px;">{T['hero_title']}</div>
+box-shadow: 0 25px 70px rgba(102,126,234,0.25);">
+  <div style="font-size:56px;font-weight:900;margin:0 0 6px 0;">{T['hero_title']}</div>
   <div style="font-size:24px;font-weight:700;opacity:0.98;">{T['hero_subtitle']}</div>
   <div style="font-size:18px;margin-top:12px;opacity:0.92;">{T['hero_tagline']}</div>
   <div style="font-size:14px;margin-top:16px;opacity:0.9;">✨ {T['hero_stats']}</div>
@@ -339,14 +266,12 @@ with st.sidebar:
     sql_vendor = st.selectbox(T["sidebar_sql_vendor"], T["sidebar_sql_vendors"], index=0)
 
     st.markdown("---")
-    # IA: toggle + lecture clé depuis Secrets/ENV + saisie
     use_ai = st.toggle(T['sidebar_ai'], value=False)
-    model_name: Optional[str] = None
-    api_key: Optional[str] = None
+    model_name = "gpt-4o-mini"
+    api_key = ""
     if use_ai:
         model_name = st.text_input(T['sidebar_model'], value="gpt-4o-mini")
-        prefill_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
-        api_key = st.text_input(T['sidebar_key'], type="password", value=prefill_key)
+        api_key = st.text_input(T['sidebar_key'], type="password", value=os.getenv("OPENAI_API_KEY",""))
     st.caption(T['sidebar_hint'])
 
 # =========================
@@ -378,64 +303,63 @@ DEFAULT_DATA = pd.DataFrame({
 })
 
 # SQL module framework (6 domains × 1 question each – extensible)
-def make_sql_df(vendor_label: str) -> pd.DataFrame:
-    return pd.DataFrame({
-        "domain": [
-            "SQL Performance","Query Design","Indexing Strategy",
-            "Schema & Modeling","Security & Compliance","Observability & Monitoring"
-        ],
-        "question": [
-            f"Workload efficiency & cost/perf optimization ({vendor_label})",
-            "Use of CTEs/Window functions; anti-pattern avoidance; parameterization",
-            "Appropriate composite/covering indexes; stats maintenance; partitioning",
-            "Star/Snowflake modeling; normalization vs denormalization; data contracts",
-            "RBAC/ABAC; data masking; encryption; secrets management; auditability",
-            "Query plans, slow log, query store; SLO/SLA; automated alerts"
-        ],
-        "weight": [1.2, 1.0, 1.1, 1.0, 1.1, 0.9],
-        "level_1": [
-            "No baselines; cost overruns",
-            "Ad hoc queries; N+1; SELECT *",
-            "No indexes; table scans",
-            "No modeling strategy; drift",
-            "Weak permissions; no masking",
-            "No monitoring; blind spots"
-        ],
-        "level_2": [
-            "Basic review; sporadic tuning",
-            "Some patterns; basic params",
-            "Few indexes; stale stats",
-            "Partial modeling; undocumented",
-            "Manual permissions; basic audit",
-            "Manual checks; few scripts"
-        ],
-        "level_3": [
-            "KPIs set; scheduled reviews",
-            "Consistent patterns; lint rules",
-            "Coverage indexes; stats refresh",
-            "Clear models; contracts v1",
-            "RBAC in place; masking critical",
-            "Dashboards; slow query triage"
-        ],
-        "level_4": [
-            "Autoscale/slots; workload mgmt",
-            "Query templates; library reuse",
-            "Partitioning; hot/cold strategy",
-            "Data vault & marts; CDC pipelines",
-            "ABAC; tokenization; KMS/HSM",
-            "SLO/SLA w/ alerts; runbooks"
-        ],
-        "level_5": [
-            "Autotune; budget guardrails",
-            "Pattern registry; query reviews",
-            "Adaptive indexing; advisor pipeline",
-            "Domain mesh; contract tests CI",
-            "Zero Trust; continuous compliance",
-            "Anomaly detection; self-healing"
-        ]
-    })
+SQL_DATA = pd.DataFrame({
+    "domain": [
+        "SQL Performance","Query Design","Indexing Strategy",
+        "Schema & Modeling","Security & Compliance","Observability & Monitoring"
+    ],
+    "question": [
+        f"Workload efficiency & cost/perf optimization ({sql_vendor})",
+        "Use of CTEs/Window functions; anti-pattern avoidance; parameterization",
+        "Appropriate composite/covering indexes; stats maintenance; partitioning",
+        "Star/Snowflake modeling; normalization vs denormalization; data contracts",
+        "RBAC/ABAC; data masking; encryption; secrets management; auditability",
+        "Query plans, slow log, query store; SLO/SLA; automated alerts"
+    ],
+    "weight": [1.2, 1.0, 1.1, 1.0, 1.1, 0.9],
+    "level_1": [
+        "No baselines; cost overruns",
+        "Ad hoc queries; N+1; SELECT *",
+        "No indexes; table scans",
+        "No modeling strategy; drift",
+        "Weak permissions; no masking",
+        "No monitoring; blind spots"
+    ],
+    "level_2": [
+        "Basic review; sporadic tuning",
+        "Some patterns; basic params",
+        "Few indexes; stale stats",
+        "Partial modeling; undocumented",
+        "Manual permissions; basic audit",
+        "Manual checks; few scripts"
+    ],
+    "level_3": [
+        "KPIs set; scheduled reviews",
+        "Consistent patterns; lint rules",
+        "Coverage indexes; stats refresh",
+        "Clear models; contracts v1",
+        "RBAC in place; masking critical",
+        "Dashboards; slow query triage"
+    ],
+    "level_4": [
+        "Autoscale/slots; workload mgmt",
+        "Query templates; library reuse",
+        "Partitioning; hot/cold strategy",
+        "Data vault & marts; CDC pipelines",
+        "ABAC; tokenization; KMS/HSM",
+        "SLO/SLA w/ alerts; runbooks"
+    ],
+    "level_5": [
+        "Autotune; budget guardrails",
+        "Pattern registry; query reviews",
+        "Adaptive indexing; advisor pipeline",
+        "Domain mesh; contract tests CI",
+        "Zero Trust; continuous compliance",
+        "Anomaly detection; self-healing"
+    ]
+})
 
-# Charger Excel si fourni
+# Load Excel if provided
 if excel_file:
     try:
         df_questions = pd.read_excel(excel_file, sheet_name="questions")
@@ -446,10 +370,9 @@ else:
     df_questions = DEFAULT_DATA.copy()
     st.info(T['upload_prompt'])
 
-# Ajouter le module SQL si activé
+# Merge SQL module if toggled
 if include_sql:
-    sql_df = make_sql_df(sql_vendor if isinstance(sql_vendor, str) else "Generic")
-    df_questions = pd.concat([df_questions, sql_df], ignore_index=True)
+    df_questions = pd.concat([df_questions, SQL_DATA], ignore_index=True)
 
 # =========================
 # ASSESSMENT
@@ -483,11 +406,11 @@ def calc_score(group: pd.DataFrame) -> float:
     norm = (group["level"] - 1) / 4.0 * 100.0
     return float(np.average(norm, weights=group["weight"]))
 
-domain_scores = df_answers.groupby("domain").apply(calc_score).to_dict() if not df_answers.empty else {}
+domain_scores: Dict[str, float] = df_answers.groupby("domain").apply(calc_score).to_dict() if not df_answers.empty else {}
 global_score = float(np.mean(list(domain_scores.values()))) if domain_scores else 0.0
 weak_count = len([s for s in domain_scores.values() if s < 60])
 
-# ROI (simple)
+# rough ROI calc
 time_saved_days = int(max(0, global_score) * 0.7)
 money_value_k = int(max(0, global_score) * 0.25)  # “K” units
 productivity_gain = int(max(0, global_score) * 1.2)
@@ -508,16 +431,12 @@ if domain_scores:
     fig_radar = go.Figure()
     doms = list(domain_scores.keys())
     vals = [domain_scores[d] for d in doms]
-    if len(doms) > 1:
-        doms_loop = doms + [doms[0]]
-        vals_loop = vals + [vals[0]]
-    else:
-        doms_loop = doms * 2
-        vals_loop = vals * 2
+    doms_loop = (doms + [doms[0]]) if len(doms) > 1 else (doms * 2)
+    vals_loop = (vals + [vals[0]]) if len(vals) > 1 else (vals * 2)
 
     fig_radar.add_trace(go.Scatterpolar(
         r=vals_loop, theta=doms_loop, fill='toself',
-        fillcolor='rgba(99, 102, 241, 0.35)', line=dict(color='#6366f1', width=3),
+        fillcolor='rgba(102, 126, 234, 0.35)', line=dict(color='#667eea', width=3),
         name='Score'
     ))
     fig_radar.update_layout(
@@ -568,13 +487,11 @@ c3.metric(T['roi_productivity'], f"+{productivity_gain}%")
 # =========================
 st.markdown(f"<h2 style='margin-top:30px;'>{T['timeline_title']}</h2>", unsafe_allow_html=True)
 sorted_domains = sorted(domain_scores.items(), key=lambda x: x[1])[:3] if domain_scores else []
-def safe_dom(i):
-    return sorted_domains[i][0] if len(sorted_domains) > i else "—"
-def safe_val(i):
-    return f"{sorted_domains[i][1]:.1f}" if len(sorted_domains) > i else "—"
+def safe_dom(i): return sorted_domains[i][0] if len(sorted_domains) > i else "—"
+def safe_val(i): return f"{sorted_domains[i][1]:.1f}" if len(sorted_domains) > i else "—"
 
 st.markdown(f"""
-<div style="background:#0f172a;border-left:5px solid #6366f1;padding:20px;border-radius:10px;margin:10px 0;">
+<div style="background:#1e293b;border-left:5px solid #667eea;padding:20px;border-radius:10px;margin:10px 0;">
   <strong>{T['timeline_90d']}</strong>
   <ul style="color:#cbd5e1;line-height:1.9;">
     <li>Stand-up governance & steering on <b>{safe_dom(0)}</b> (current {safe_val(0)}/100)</li>
@@ -582,7 +499,7 @@ st.markdown(f"""
     <li>Enable dashboards & weekly follow-up; quick wins playbook</li>
   </ul>
 </div>
-<div style="background:#0f172a;border-left:5px solid #8b5cf6;padding:20px;border-radius:10px;margin:10px 0;">
+<div style="background:#1e293b;border-left:5px solid #764ba2;padding:20px;border-radius:10px;margin:10px 0;">
   <strong>{T['timeline_6m']}</strong>
   <ul style="color:#cbd5e1;line-height:1.9;">
     <li>Rollout tooling & automation (catalog, quality, lineage)</li>
@@ -590,7 +507,7 @@ st.markdown(f"""
     <li>Data community & champions program; training plan</li>
   </ul>
 </div>
-<div style="background:#0f172a;border-left:5px solid #10b981;padding:20px;border-radius:10px;margin:10px 0;">
+<div style="background:#1e293b;border-left:5px solid #10b981;padding:20px;border-radius:10px;margin:10px 0;">
   <strong>{T['timeline_12m']}</strong>
   <ul style="color:#cbd5e1;line-height:1.9;">
     <li>Predictive controls; contract tests in CI/CD</li>
@@ -601,18 +518,93 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # =========================
-# EXEC REPORT (Markdown) + PDF
+# IA (OpenAI) — executive summary + roadmap
+# =========================
+def ai_generate(api_key: str, model: str, prompt: str) -> Optional[str]:
+    try:
+        from openai import OpenAI  # OpenAI SDK v1.x
+        client = OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a senior transformation consultant (IT/Data/Security/Governance/Product). Be concise, executive, actionable."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.4,
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        return f"(AI unavailable) {e}"
+
+summary_ai: Optional[str] = None
+roadmap_ai: Optional[str] = None
+
+base_context = f"Scores: {domain_scores}\nPriorities: {', '.join([d for d,_ in sorted(domain_scores.items(), key=lambda x:x[1])[:3]])}\nROI: ${money_value_k}K, {time_saved_days}d/yr"
+
+if use_ai and api_key:
+    if st.session_state.current_lang == "fr":
+        prompt_sum = f"""Écris une synthèse exécutive (≤10 lignes) pour un COMEX à partir de ce diagnostic de maturité.
+Mets en avant 3 forces et 3 risques, et termine par une recommandation.
+Contexte:\n{base_context}"""
+        prompt_map = f"""Construis une feuille de route priorisée (actions SMART):
+- 90 jours: 5 actions pragmatiques
+- 6 mois: 5 actions structurantes
+- 12 mois: 5 actions de scale
+Pour chaque action: objectif mesurable, owner (rôle), effort (S/M/L), impact.
+Contexte:\n{base_context}"""
+    else:
+        prompt_sum = f"""Write an executive summary (≤10 lines) for the C-suite based on this maturity assessment.
+Highlight 3 strengths and 3 risks and close with one recommendation.
+Context:\n{base_context}"""
+        prompt_map = f"""Build a prioritized roadmap (SMART actions):
+- 90 days: 5 pragmatic actions
+- 6 months: 5 structural actions
+- 12 months: 5 scale actions
+For each: measurable objective, owner (role), effort (S/M/L), impact.
+Context:\n{base_context}"""
+
+    with st.spinner("Generating AI insights..."):
+        summary_ai = ai_generate(api_key, model_name, prompt_sum)
+        roadmap_ai = ai_generate(api_key, model_name, prompt_map)
+else:
+    st.info(T.get("ai_info", ""))
+
+# =========================
+# REPORT (Markdown) + PDF Export
 # =========================
 st.markdown(f"<h2 style='margin-top:30px;'>{T['section_report']}</h2>", unsafe_allow_html=True)
 
-def domain_table_md(scores: dict[str, float]) -> str:
-    if not scores: return "_No scores._" if st.session_state.current_lang=="en" else "_Aucun score._"
+def domain_table_md(scores: Dict[str, float]) -> str:
+    if not scores: return "_No scores._"
     rows = "\n".join([f"| {d} | {s:.1f} |" for d,s in sorted(scores.items(), key=lambda x:x[1], reverse=True)])
     return f"| Domain | Score |\n|---|---:|\n{rows}"
 
 benchmark_avg = 68.0
 benchmark_delta = global_score - benchmark_avg
 rank_percentile = max(1, min(99, int(global_score * 0.95)))
+
+# Heuristic fallback texts if AI off
+if summary_ai is None:
+    if st.session_state.current_lang == "fr":
+        strengths = ", ".join([d for d,s in domain_scores.items() if s >= 70]) or "—"
+        risks = ", ".join([d for d,s in domain_scores.items() if s < 60]) or "—"
+        summary_ai = f"**Synthèse** — Score global **{global_score:.1f}/100**. Forces: {strengths}. Risques/Priorités: {risks}."
+    else:
+        strengths = ", ".join([d for d,s in domain_scores.items() if s >= 70]) or "—"
+        risks = ", ".join([d for d,s in domain_scores.items() if s < 60]) or "—"
+        summary_ai = f"**Summary** — Global score **{global_score:.1f}/100**. Strengths: {strengths}. Risks/Priorities: {risks}."
+
+if roadmap_ai is None:
+    if st.session_state.current_lang == "fr":
+        roadmap_ai = f"""**Feuille de route (heuristique)**  
+- 90 jours: gouvernance + audit des domaines faibles; KPIs; suivis hebdo  
+- 6 mois: outillage (catalogue/qualité/lignage), standardisation processus  
+- 12 mois: contrôles prédictifs, certifications, passage à l’échelle"""
+    else:
+        roadmap_ai = f"""**Roadmap (heuristic)**  
+- 90 days: governance + audit of weakest domains; KPIs; weekly follow-up  
+- 6 months: tooling (catalog/quality/lineage), process standardization  
+- 12 months: predictive controls, certifications, scale-up"""
 
 report_md = f"""# 🚀 Maturity Assessment Report — {datetime.now().strftime('%Y-%m-%d')}
 
@@ -632,6 +624,15 @@ report_md = f"""# 🚀 Maturity Assessment Report — {datetime.now().strftime('
 
 ---
 
+## 🧠 / 🧭 AI Insights
+### {T['ai_summary_title']}
+{summary_ai}
+
+### {T['ai_roadmap_title']}
+{roadmap_ai}
+
+---
+
 ## 💎 Transformation Value
 - ⏱️ Time Saved: **{time_saved_days} days/year**
 - 💰 ROI Value: **${money_value_k}K**
@@ -639,88 +640,50 @@ report_md = f"""# 🚀 Maturity Assessment Report — {datetime.now().strftime('
 
 ---
 
-## 🗓️ Roadmap
-### {T['timeline_90d']}
-- Governance & steering on weakest domains
-- Rapid audit; define KPIs/thresholds
-- Dashboards + weekly follow-up; quick wins playbook
-
-### {T['timeline_6m']}
-- Tooling & automation (catalog, quality, lineage)
-- Standardize processes; RACI; controls
-- Data community & champions; training plan
-
-### {T['timeline_12m']}
-- Predictive controls; contract tests CI/CD
-- Target ≥ 4/5 on weak domains; certifications
-- Scale program; embed culture
+## 🗓️ Roadmap (UI Cards)
+- 90d / 6m / 12m cards displayed in app
 """
 
 st.code(report_md, language="markdown")
-st.download_button(T["download_report"], data=report_md.encode("utf-8"),
-                   file_name=f"maturity_report_{datetime.now().strftime('%Y%m%d')}.md",
-                   mime="text/markdown", use_container_width=True)
+st.download_button(
+    T["download_report"],
+    data=report_md.encode("utf-8"),
+    file_name=f"maturity_report_{datetime.now().strftime('%Y%m%d')}.md",
+    mime="text/markdown",
+    use_container_width=True
+)
 
-# PDF export (bouton)
-pdf_col1, _ = st.columns([1,2])
+# PDF export: convert Markdown to minimal HTML, then export
+def md_to_html(md_text: str) -> str:
+    esc = (md_text.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;"))
+    return f"""
+<!doctype html><html><head><meta charset="utf-8">
+<title>Maturity Report</title></head>
+<body>
+<pre style="white-space: pre-wrap; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, Arial; font-size:14px; color:#111827;">
+{esc}
+</pre>
+</body></html>
+"""
+
+pdf_col1, pdf_col2 = st.columns([1,2])
 with pdf_col1:
     if st.button(T["download_pdf"], type="primary", use_container_width=True):
         html_str = md_to_html(report_md)
         pdf_bytes = try_export_pdf(html_str)
         if pdf_bytes:
-            st.download_button("⬇️ PDF Ready — Click to Download",
-                               data=pdf_bytes,
-                               file_name=f"maturity_report_{datetime.now().strftime('%Y%m%d')}.pdf",
-                               mime="application/pdf",
-                               use_container_width=True)
+            st.download_button(
+                "⬇️ PDF Ready — Click to Download",
+                data=pdf_bytes,
+                file_name=f"maturity_report_{datetime.now().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
         else:
             st.warning(T["pdf_missing"])
 
 # =========================
-# IA OpenAI — Contexte + Appel + Rendu (optionnel)
-# =========================
-# Contexte minimal (tu peux enrichir)
-if domain_scores:
-    domain_scores_str = ", ".join([f"{d}: {s:.1f}" for d, s in domain_scores.items()])
-else:
-    domain_scores_str = "N/A"
-prio_list_str = ", ".join([r["domain"] for _, r in prio_df.iterrows()]) if not prio_df.empty else "N/A"
-
-ctx_text = f"""Score global: {global_score:.1f}/100
-Scores par domaine: {domain_scores_str}
-Domaines prioritaires (ordre décroissant): {prio_list_str}
-"""
-
-summary_md_ai = None
-roadmap_md_ai = None
-
-if 'ai_already_called' not in st.session_state:
-    st.session_state.ai_already_called = False
-
-if use_ai and not st.session_state.ai_already_called:
-    if not api_key:
-        st.warning("🔒 IA activée mais clé OpenAI absente (Secrets/ENV/Champ). Mode heuristique conservé.")
-    else:
-        with st.spinner("🤖 Génération IA (synthèse exécutive & feuille de route)…"):
-            try:
-                summary_md_ai, roadmap_md_ai = call_openai_summary_and_roadmap(api_key, model_name or "gpt-4o-mini", ctx_text)
-                st.session_state.summary_md_ai = summary_md_ai
-                st.session_state.roadmap_md_ai = roadmap_md_ai
-                st.session_state.ai_already_called = True
-            except Exception as e:
-                st.error(f"Échec IA: {e}")
-
-# Affichage IA si dispo
-if st.session_state.get("summary_md_ai"):
-    st.markdown("#### 🧠 Synthèse Exécutive (IA)")
-    st.markdown(st.session_state.summary_md_ai)
-
-if st.session_state.get("roadmap_md_ai"):
-    st.markdown("#### 🧭 Feuille de Route (IA)")
-    st.markdown(st.session_state.roadmap_md_ai)
-
-# =========================
-# LINKEDIN POST (rapide)
+# LINKEDIN POST (quick)
 # =========================
 st.markdown(f"<h2 style='margin-top:30px;'>{T['section_linkedin']}</h2>", unsafe_allow_html=True)
 top3 = ", ".join([d for d,_ in sorted(domain_scores.items(), key=lambda x:x[1])[:3]]) if domain_scores else "—"
