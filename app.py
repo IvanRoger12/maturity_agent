@@ -1,11 +1,10 @@
-# app.py — MaturityAgent PRO (Ultimate v9.1 – Stable)
+# app.py — MaturityAgent PRO (Ultimate v9.2 – Stable IA All Versions)
 # ------------------------------------------------------------
-# ✅ Correctifs :
-# - Init langue sécurisée (plus de KeyError)
-# - Widgets avec clés explicites
-# - IA activable via clé OpenAI dans Secrets
-# - Boutons download sans width="stretch" (TypeError corrigé)
-# - Pandas groupby.apply + width Streamlit fixés
+# Fixes:
+# ✅ OpenAI compatibility with 0.x and 1.x SDK (no proxies issue)
+# ✅ Secure lang init (no KeyError)
+# ✅ Download buttons cleaned (no TypeError width)
+# ✅ PDF export works (WeasyPrint / pdfkit)
 # ------------------------------------------------------------
 
 import os
@@ -16,7 +15,7 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 
-# ============== PDF Export Helper ==============
+# ============== PDF EXPORT ==============
 def try_export_pdf(html_str: str):
     """Try exporting HTML to PDF via WeasyPrint or pdfkit."""
     try:
@@ -37,8 +36,9 @@ def try_export_pdf(html_str: str):
         pass
     return None
 
-# ============== OpenAI Helper ==============
+# ============== OPENAI UNIVERSAL CLIENT ==============
 def get_openai_client():
+    """Return OpenAI client compatible with both 0.x and 1.x SDKs."""
     key = os.getenv("OPENAI_API_KEY", "")
     try:
         key = key or st.secrets.get("OPENAI_API_KEY", "")
@@ -46,24 +46,42 @@ def get_openai_client():
         pass
     if not key:
         return None, "No OPENAI_API_KEY found. Add it in Streamlit Secrets."
+
+    # Try SDK 1.x
     try:
         from openai import OpenAI
-        return OpenAI(api_key=key), None
-    except Exception as e:
-        return None, f"OpenAI SDK unavailable: {e}"
+        client = OpenAI(api_key=key)
+        return {"mode": "v1", "client": client}, None
+    except Exception as e1:
+        # Try legacy 0.x
+        try:
+            import openai
+            openai.api_key = key
+            class LegacyClient:
+                def chat_completions_create(self, **kwargs):
+                    return openai.ChatCompletion.create(**kwargs)
+            return {"mode": "v0", "client": LegacyClient()}, None
+        except Exception as e2:
+            return None, f"OpenAI SDK unavailable (1.x: {e1}; 0.x: {e2})"
+
+def openai_chat(client_pack, model: str, messages: list, temperature: float = 0.4) -> str:
+    """Unified chat call for OpenAI 0.x and 1.x SDKs."""
+    mode = client_pack["mode"]
+    client = client_pack["client"]
+    if mode == "v1":
+        resp = client.chat.completions.create(model=model, messages=messages, temperature=temperature)
+        return resp.choices[0].message.content.strip()
+    else:
+        resp = client.chat_completions_create(model=model, messages=messages, temperature=temperature)
+        return resp["choices"][0]["message"]["content"].strip()
 
 # =========================
-# Page Config
+# PAGE CONFIG
 # =========================
-st.set_page_config(
-    page_title="MaturityAgent PRO - AI Strategic Transformation",
-    page_icon="🚀",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="MaturityAgent PRO - AI Strategic Transformation", page_icon="🚀", layout="wide")
 
 # =========================
-# Lang init safe
+# LANG INIT
 # =========================
 if "current_lang" not in st.session_state:
     try:
@@ -76,63 +94,44 @@ if "current_lang" not in st.session_state:
         lang = "fr"
     st.session_state.current_lang = lang
 
+# =========================
+# TEXTS
+# =========================
 LANGS = {
-    "fr": {"hero_title": "🚀 MaturityAgent PRO",
-           "hero_subtitle": "IA × Consulting × Data Engineering",
-           "hero_tagline": "Transformez tout référentiel en feuille de route IA en moins d'1h",
-           "hero_stats": "Utilisé par 500+ CDOs & Data Leaders",
-           "sidebar_title": "⚙️ Configuration",
-           "sidebar_lang": "🌍 Langue",
-           "sidebar_excel": "📊 Uploadez votre Référentiel (Excel)",
-           "sidebar_ai": "🤖 Agent IA (optionnel)",
-           "sidebar_model": "Modèle IA",
-           "sidebar_hint": "💡 Pas de clé ? Un rapport heuristique sera généré.",
-           "sidebar_sql_toggle": "🗄️ Inclure le module SQL",
-           "sidebar_sql_vendor": "Stack SQL",
-           "kpi_score": "Score Global",
-           "kpi_domains": "Domaines",
-           "kpi_priorities": "Priorités",
-           "kpi_savings": "Jours gagnés/an",
-           "section_assessment": "🧩 Auto-Évaluation Interactive",
-           "section_radar": "📊 Radar de Maturité",
-           "section_prio": "🎯 Priorisation",
-           "section_report": "📝 Rapport Exécutif",
-           "section_roi": "💰 ROI Business",
-           "section_linkedin": "🔗 Post LinkedIn Viral",
-           "timeline_title": "🗓️ Feuille de Route IA",
-           "timeline_90d": "🚀 90 Jours – Quick Wins",
-           "timeline_6m": "📈 6 Mois – Structuration",
-           "timeline_12m": "🎯 12 Mois – Transformation",
-           "download_report": "📥 Télécharger le Rapport (Markdown)",
-           "download_pdf": "🖨️ Exporter le Rapport PDF"},
-    "en": {"hero_title": "🚀 MaturityAgent PRO",
-           "hero_subtitle": "AI × Consulting × Data Engineering",
-           "hero_tagline": "Turn any framework into an AI roadmap in under 1 hour",
-           "hero_stats": "Trusted by 500+ CDOs & Data Leaders",
-           "sidebar_title": "⚙️ Configuration",
-           "sidebar_lang": "🌍 Language",
-           "sidebar_excel": "📊 Upload Your Framework (Excel)",
-           "sidebar_ai": "🤖 AI Agent (optional)",
-           "sidebar_model": "AI Model",
-           "sidebar_hint": "💡 No API key? A heuristic report will be generated.",
-           "sidebar_sql_toggle": "🗄️ Include SQL module",
-           "sidebar_sql_vendor": "SQL Stack",
-           "kpi_score": "Global Score",
-           "kpi_domains": "Domains",
-           "kpi_priorities": "Priorities",
-           "kpi_savings": "Days saved/year",
-           "section_assessment": "🧩 Interactive Self-Assessment",
-           "section_radar": "📊 Maturity Radar",
-           "section_prio": "🎯 Prioritization",
-           "section_report": "📝 Executive Report",
-           "section_roi": "💰 ROI Calculator",
-           "section_linkedin": "🔗 Viral LinkedIn Post",
-           "timeline_title": "🗓️ AI Roadmap",
-           "timeline_90d": "🚀 90 Days – Quick Wins",
-           "timeline_6m": "📈 6 Months – Foundation",
-           "timeline_12m": "🎯 12 Months – Transformation",
-           "download_report": "📥 Download Report (Markdown)",
-           "download_pdf": "🖨️ Export PDF"}
+    "fr": {
+        "hero_title": "🚀 MaturityAgent PRO",
+        "hero_subtitle": "IA × Consulting × Data Engineering",
+        "hero_tagline": "Transformez n'importe quel référentiel en feuille de route IA en 1h",
+        "sidebar_title": "⚙️ Configuration",
+        "sidebar_lang": "🌍 Langue",
+        "sidebar_excel": "📊 Uploadez votre Référentiel (Excel)",
+        "sidebar_ai": "🤖 Agent IA (optionnel)",
+        "sidebar_model": "Modèle IA",
+        "sidebar_hint": "💡 Pas de clé ? Rapport heuristique généré.",
+        "section_assessment": "🧩 Auto-Évaluation Interactive",
+        "section_radar": "📊 Radar de Maturité",
+        "section_report": "📝 Rapport Exécutif",
+        "section_linkedin": "🔗 Post LinkedIn Viral",
+        "download_report": "📥 Télécharger (Markdown)",
+        "download_pdf": "🖨️ Exporter PDF"
+    },
+    "en": {
+        "hero_title": "🚀 MaturityAgent PRO",
+        "hero_subtitle": "AI × Consulting × Data Engineering",
+        "hero_tagline": "Turn any framework into an AI roadmap in 1h",
+        "sidebar_title": "⚙️ Settings",
+        "sidebar_lang": "🌍 Language",
+        "sidebar_excel": "📊 Upload Framework (Excel)",
+        "sidebar_ai": "🤖 AI Agent (optional)",
+        "sidebar_model": "AI Model",
+        "sidebar_hint": "💡 No key? Heuristic report only.",
+        "section_assessment": "🧩 Interactive Self-Assessment",
+        "section_radar": "📊 Maturity Radar",
+        "section_report": "📝 Executive Report",
+        "section_linkedin": "🔗 Viral LinkedIn Post",
+        "download_report": "📥 Download (Markdown)",
+        "download_pdf": "🖨️ Export PDF"
+    }
 }
 T = LANGS[st.session_state.current_lang]
 
@@ -140,13 +139,11 @@ T = LANGS[st.session_state.current_lang]
 # HERO
 # =========================
 st.markdown(f"""
-<div style="
-background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-padding: 60px; border-radius: 16px; text-align: center; color: white;">
-  <div style="font-size:52px;font-weight:900;">{T['hero_title']}</div>
-  <div style="font-size:22px;font-weight:700;">{T['hero_subtitle']}</div>
-  <div style="font-size:16px;margin-top:12px;opacity:0.92;">{T['hero_tagline']}</div>
-  <div style="font-size:14px;margin-top:14px;opacity:0.9;">✨ {T['hero_stats']}</div>
+<div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+padding:60px;border-radius:16px;text-align:center;color:white;">
+  <div style="font-size:50px;font-weight:900;">{T['hero_title']}</div>
+  <div style="font-size:22px;font-weight:600;">{T['hero_subtitle']}</div>
+  <div style="font-size:16px;margin-top:10px;">{T['hero_tagline']}</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -155,44 +152,33 @@ padding: 60px; border-radius: 16px; text-align: center; color: white;">
 # =========================
 with st.sidebar:
     st.markdown(f"### {T['sidebar_title']}")
-    new_lang = st.selectbox(
-        T["sidebar_lang"], ["fr", "en"],
-        index=(0 if st.session_state.current_lang == "fr" else 1),
-        key="lang_select"
-    )
+    new_lang = st.selectbox(T["sidebar_lang"], ["fr", "en"], index=(0 if st.session_state.current_lang=="fr" else 1))
     if new_lang != st.session_state.current_lang:
         st.session_state.current_lang = new_lang
-        try:
-            st.query_params["lang"] = new_lang
-        except Exception:
-            pass
+        try: st.query_params["lang"] = new_lang
+        except Exception: pass
         st.rerun()
 
-    excel_file = st.file_uploader(T['sidebar_excel'], type=["xlsx"], key="xls_upl")
-    include_sql = st.toggle(T["sidebar_sql_toggle"], value=True, key="sql_toggle")
-    sql_vendor = st.selectbox(T["sidebar_sql_vendor"], ["Postgres","BigQuery","Snowflake"], key="sql_vendor")
-
-    st.markdown("---")
-    use_ai = st.toggle(T['sidebar_ai'], value=False, key="ai_toggle")
+    excel_file = st.file_uploader(T["sidebar_excel"], type=["xlsx"])
+    use_ai = st.toggle(T["sidebar_ai"], value=False)
     if use_ai:
-        model_name = st.text_input(T['sidebar_model'], value="gpt-4o-mini", key="ai_model")
-    st.caption(T['sidebar_hint'])
+        model_name = st.text_input(T["sidebar_model"], value="gpt-4o-mini")
+    st.caption(T["sidebar_hint"])
 
 # =========================
-# Framework de base
+# QUESTIONS DE BASE
 # =========================
 DEFAULT_DATA = pd.DataFrame({
     "domain": ["Data Strategy","Data Governance","Data Quality","Data Architecture","Data Security"],
     "question": [
         "Alignment between data vision and business goals",
-        "Structured governance and clear ownership",
-        "Automated quality monitoring and controls",
-        "Modern scalable cloud architecture",
-        "Security and compliance proactively managed"
+        "Structured governance with clear ownership",
+        "Automated quality monitoring",
+        "Modern, cloud-native architecture",
+        "Security and compliance managed"
     ],
     "weight": [1.2,1.0,1.1,0.9,1.3],
 })
-
 df_questions = DEFAULT_DATA.copy()
 answers = {}
 
@@ -203,7 +189,7 @@ for i, row in df_questions.iterrows():
         for j, c in enumerate(cols,1):
             if c.button(f"✓ {j}", key=f"btn_{i}_{j}"):
                 st.session_state[f"lvl_{i}"]=j
-        lvl=st.session_state.get(f"lvl_{i}",3)
+        lvl = st.session_state.get(f"lvl_{i}",3)
         answers[i]={"domain":row["domain"],"level":lvl,"weight":row["weight"]}
 
 df_answers=pd.DataFrame(answers).T
@@ -212,76 +198,61 @@ domain_scores=df_answers.groupby("domain",group_keys=False).apply(calc_score).to
 global_score=np.mean(list(domain_scores.values())) if domain_scores else 0
 
 # KPI
-k1,k2,k3=st.columns(3)
-k1.metric(T["kpi_score"],f"{global_score:.1f}")
-k2.metric(T["kpi_domains"],len(domain_scores))
-k3.metric(T["kpi_savings"],f"{int(global_score*0.7)}")
+st.metric("🌍 Global Score", f"{global_score:.1f}/100")
+st.metric("📊 Domains", len(domain_scores))
 
-# Radar
+# =========================
+# RADAR
+# =========================
 if domain_scores:
     fig=go.Figure()
     doms=list(domain_scores.keys()); vals=list(domain_scores.values())
-    fig.add_trace(go.Scatterpolar(r=vals+[vals[0]],theta=doms+[doms[0]],fill='toself',
-                    fillcolor='rgba(102,126,234,0.35)',line=dict(color='#667eea')))
+    fig.add_trace(go.Scatterpolar(r=vals+[vals[0]],theta=doms+[doms[0]],fill='toself',fillcolor='rgba(102,126,234,0.35)',line=dict(color='#667eea')))
     fig.update_layout(polar=dict(radialaxis=dict(range=[0,100])),showlegend=False)
     st.plotly_chart(fig,use_container_width=True)
 
-# =============== IA Summary ===============
-summary_text, roadmap_text=None,None
+# =========================
+# IA SECTION
+# =========================
+summary_text=None
 if use_ai:
-    client,err=get_openai_client()
-    if err: st.warning(err)
+    pack, err = get_openai_client()
+    if err: st.warning(f"⚠️ {err}")
     else:
         try:
-            prompt=f"""Give a concise executive summary (max 10 lines) about this maturity assessment:
-            Global score: {global_score:.1f}/100
-            Domain scores: {domain_scores}
-            Provide 3 strengths and 3 improvements."""
-            resp=client.chat.completions.create(model=model_name,temperature=0.4,
-                messages=[{"role":"user","content":prompt}])
-            summary_text=resp.choices[0].message.content.strip()
-            st.success("✅ IA activée — synthèse générée.")
+            msg=[{"role":"system","content":"You are a data strategy consultant."},
+                 {"role":"user","content":f"Summarize this maturity: {domain_scores}, global={global_score:.1f}"}]
+            summary_text=openai_chat(pack, model_name, msg)
+            st.success("✅ IA summary generated")
             st.write(summary_text)
         except Exception as e:
             st.error(f"OpenAI error: {e}")
 
-# =============== Rapport Markdown ===============
-report_md=f"""# Maturity Assessment Report — {datetime.now().strftime('%Y-%m-%d')}
-
-## Global Score
-**{global_score:.1f}/100**
-
-### Breakdown
-{chr(10).join([f'- {d}: {s:.1f}' for d,s in domain_scores.items()])}
-
----
-
-## Executive Summary
-{summary_text or '—'}
+# =========================
+# REPORT + PDF
+# =========================
+report_md=f"""# Maturity Report — {datetime.now().strftime('%Y-%m-%d')}
+**Global Score:** {global_score:.1f}/100
+{summary_text or ''}
 """
+st.download_button(T["download_report"], report_md, file_name="maturity_report.md")
 
-st.download_button(
-    T["download_report"],
-    data=report_md.encode("utf-8"),
-    file_name=f"maturity_report_{datetime.now().strftime('%Y%m%d')}.md",
-    mime="text/markdown"
-)
-
-def md_to_html(md):
-    esc=(md.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;"))
-    return f"<html><body><pre>{esc}</pre></body></html>"
-
+def md_to_html(md): return f"<html><body><pre>{md}</pre></body></html>"
 if st.button(T["download_pdf"]):
     pdf=try_export_pdf(md_to_html(report_md))
     if pdf:
-        st.download_button(
-            "⬇️ PDF Ready — Click to Download",
-            data=pdf,
-            file_name=f"maturity_report_{datetime.now().strftime('%Y%m%d')}.pdf",
-            mime="application/pdf"
-        )
+        st.download_button("⬇️ PDF Ready", pdf, file_name="maturity_report.pdf", mime="application/pdf")
     else:
         st.warning("PDF engine missing. Install weasyprint or pdfkit.")
 
-st.markdown("---")
+# =========================
+# LINKEDIN
+# =========================
+st.markdown(f"## {T['section_linkedin']}")
+post=f"""🚀 MaturityAgent PRO — Instant maturity assessment in Streamlit.
+Score: {global_score:.1f}/100
+Domains: {', '.join(domain_scores.keys()) if domain_scores else '—'}
+#Data #AI #Governance #Streamlit"""
+st.text_area("LinkedIn", value=post, height=220)
+
 st.caption("© 2025 MaturityAgent PRO • MIT License")
