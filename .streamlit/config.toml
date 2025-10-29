@@ -1,7 +1,7 @@
 [theme]
-base="light"
+base="dark"
 primaryColor="#667eea"
-backgroundColor="#ffffff"
-secondaryBackgroundColor="#f5f7fb"
-textColor="#111827"
+backgroundColor="#0b1220"            # fond sombre (plus de blanc)
+secondaryBackgroundColor="#1e293b"   # panneaux/cartes
+textColor="#e5e7eb"                  # texte lisible sur fond sombre
 font="sans serif"
