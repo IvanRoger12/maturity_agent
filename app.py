@@ -1,3 +1,4 @@
+# Fichier: app.py (Version Finale - PROPRE - GARANTIE)
 import os
 import io
 import base64
@@ -71,8 +72,6 @@ LANGS = {
         "quick_win_line": "- [{domain}] **Action prioritaire** sur “{question}” (Score actuel: {level}/5) — Viser le niveau 3."
     },
     "en": {
-        # ... (Gardez les traductions EN si vous le souhaitez, je me concentre sur le FR pour l'impact)
-        # ... (Vous pouvez traduire la nouvelle version FR si besoin)
          "app_title": "🚀 Strategic Transformation AI Agent",
         "app_sub": "Turn any maturity framework into an AI-driven roadmap. Target priorities, generate reports, and drive change.",
         "sidebar_title": "⚙️ Settings",
@@ -141,41 +140,41 @@ body {
     color: #F8FAFC; /* Texte clair */
 }
 /* Titres */
-.title { 
-    font-size: 38px; 
-    font-weight: 800; 
-    margin-bottom: 4px; 
+.title {
+    font-size: 38px;
+    font-weight: 800;
+    margin-bottom: 4px;
     letter-spacing: -0.5px;
 }
-.sub { 
+.sub {
     color: #CBD5E1; /* Gris clair */
-    margin-bottom: 24px; 
+    margin-bottom: 24px;
     font-size: 18px;
 }
 /* Cartes KPI - Look "Dashboard" */
-.card { 
+.card {
     background-color: #1E293B; /* Slate 800 */
     border: 1px solid #334155; /* Slate 700 */
-    border-radius: 12px; 
+    border-radius: 12px;
     padding: 24px;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
 }
-.kpi { 
-    font-size: 42px; 
-    font-weight: 800; 
-    line-height: 1.1; 
+.kpi {
+    font-size: 42px;
+    font-weight: 800;
+    line-height: 1.1;
     color: #F8FAFC;
 }
-.kpi-sub { 
+.kpi-sub {
     color: #94A3B8; /* Slate 400 */
-    font-size: 14px; 
+    font-size: 14px;
     font-weight: 500;
 }
 /* Gradient pour le titre */
-.gradient { 
+.gradient {
     background: linear-gradient(90deg, #A78BFA, #A78BFA); /* Violet 400 */
-    -webkit-background-clip: text; 
-    -webkit-text-fill-color: transparent; 
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
 /* Amélioration des expanders */
 .stExpander {
@@ -232,7 +231,6 @@ st.markdown(f"<div class='sub'>{T['app_sub']}</div>", unsafe_allow_html=True)
 # =========================
 # Référentiel par défaut (VOTRE EXPERTISE)
 # =========================
-# (Ceci est votre référentiel, déjà intégré. Parfait.)
 VOTRE_REFERENTIEL = pd.DataFrame([
     # === AXE 1 : Stratégie, Gouvernance, Organisation ===
     ["AXE 1 - Stratégie", "Politique & Stratégie", 1.0, 
@@ -393,6 +391,7 @@ def load_questions(uploaded):
                 df[c] = ""
         return df
     except Exception:
+        st.error(f"Erreur lors du chargement de l'Excel: {e}") # Ajout pour voir l'erreur
         return DEFAULT_QUESTIONS.copy()
 
 Q = load_questions(excel) if excel else DEFAULT_QUESTIONS.copy()
@@ -408,6 +407,11 @@ for d in domains:
     st.markdown(f"#### **{d}**")
     block = Q[Q["domain"]==d].reset_index(drop=True)
     for i, row in block.iterrows():
+        # Vérification si la ligne est valide avant de créer l'expander
+        if pd.isna(row.get("question")):
+            st.warning(f"Question manquante pour le domaine '{d}' à l'index {i}. Cette ligne est ignorée.")
+            continue
+
         with st.expander(f"{row['question']}"):
             
             # Utilisation de st.radio pour une meilleure UX
@@ -434,11 +438,12 @@ for d in domains:
             answers.append({
                 "domain": d,
                 "question": row["question"],
-                "weight": float(row["weight"]),
+                "weight": float(row["weight"]) if pd.notna(row.get("weight")) else 1.0, # Poids par défaut si manquant
                 "level": level_num
             })
 
 if not answers:
+    st.info("Veuillez répondre aux questions pour générer le rapport.")
     st.stop()
 
 A = pd.DataFrame(answers)
@@ -453,8 +458,13 @@ def score_domain(df):
         return 0.0
     return float(100 * (x["norm"] * w).sum() / w.sum())
 
-domain_scores = A.groupby("domain").apply(score_domain).to_dict()
-global_score = float(np.mean(list(domain_scores.values()))) if domain_scores else 0.0
+try:
+    domain_scores = A.groupby("domain").apply(score_domain).to_dict()
+    global_score = float(np.mean(list(domain_scores.values()))) if domain_scores else 0.0
+except Exception as e:
+    st.error(f"Erreur lors du calcul des scores: {e}")
+    st.stop()
+
 
 st.divider()
 c1,c2,c3,c4 = st.columns(4)
@@ -470,15 +480,22 @@ with c4:
 # =========================
 st.markdown(f"### {T['radar_title']}")
 fig = go.Figure()
-r_vals = [domain_scores[d] for d in domains] + [domain_scores[domains[0]]]
-theta_vals = domains + [domains[0]]
-fig.add_trace(go.Scatterpolar(
-    r=r_vals,
-    theta=theta_vals,
-    fill='toself',
-    fillcolor='rgba(167, 139, 250, 0.2)', # Violet 400
-    line=dict(color='#A78BFA', width=3) # Violet 400
-))
+
+# Vérification que tous les domaines ont un score
+valid_domains_for_radar = [d for d in domains if d in domain_scores]
+if valid_domains_for_radar:
+    r_vals = [domain_scores[d] for d in valid_domains_for_radar] + [domain_scores[valid_domains_for_radar[0]]]
+    theta_vals = valid_domains_for_radar + [valid_domains_for_radar[0]]
+    fig.add_trace(go.Scatterpolar(
+        r=r_vals,
+        theta=theta_vals,
+        fill='toself',
+        fillcolor='rgba(167, 139, 250, 0.2)', # Violet 400
+        line=dict(color='#A78BFA', width=3) # Violet 400
+    ))
+else:
+    st.warning("Aucun score de domaine valide pour afficher le radar.")
+
 fig.update_layout(
     polar=dict(
         radialaxis=dict(visible=True, range=[0,100], color="#94A3B8", gridcolor="#334155"),
@@ -495,57 +512,86 @@ st.plotly_chart(fig, use_container_width=True)
 weights_by_domain = Q.groupby("domain")["weight"].sum().to_dict()
 prio = []
 for d in domains:
-    prio.append({
-        "domain": d,
-        "score": domain_scores[d],
-        "weight_total": float(weights_by_domain.get(d,1.0)),
-        "priority_index": float((100-domain_scores[d]) * weights_by_domain.get(d,1.0))
-    })
-prio_df = pd.DataFrame(prio).sort_values("priority_index", ascending=False)
+    # S'assurer que le domaine a un score avant de calculer la priorité
+    if d in domain_scores:
+        score = domain_scores[d]
+        weight = float(weights_by_domain.get(d, 1.0))
+        prio.append({
+            "domain": d,
+            "score": score,
+            "weight_total": weight,
+            "priority_index": float((100 - score) * weight)
+        })
+
+if prio:
+    prio_df = pd.DataFrame(prio).sort_values("priority_index", ascending=False)
+else:
+    prio_df = pd.DataFrame(columns=["domain", "score", "weight_total", "priority_index"]) # DataFrame vide
 
 st.markdown(f"### {T['prio_title']}")
 st.dataframe(prio_df, use_container_width=True) # Dataframe s'adapte bien au dark mode
 
-bar = px.bar(
-    prio_df, x="domain", y="priority_index", color="score",
-    title=T["bar_title"], text=prio_df["score"].round(1),
-    color_continuous_scale=px.colors.sequential.Viridis # Une échelle de couleur qui marche sur le noir
-)
-bar.update_traces(textposition="outside")
-bar.update_layout(
-    paper_bgcolor='rgba(0,0,0,0)',
-    plot_bgcolor='rgba(0,0,0,0)',
-    font_color="#F8FAFC",
-    yaxis_gridcolor="#334155",
-    xaxis_gridcolor="#334155"
-)
-st.plotly_chart(bar, use_container_width=True)
+if not prio_df.empty:
+    bar = px.bar(
+        prio_df, x="domain", y="priority_index", color="score",
+        title=T["bar_title"], text=prio_df["score"].round(1),
+        color_continuous_scale=px.colors.sequential.Viridis # Une échelle de couleur qui marche sur le noir
+    )
+    bar.update_traces(textposition="outside")
+    bar.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font_color="#F8FAFC",
+        yaxis_gridcolor="#334155",
+        xaxis_gridcolor="#334155"
+    )
+    st.plotly_chart(bar, use_container_width=True)
+else:
+     st.warning("Impossible de générer le graphique de priorisation (pas de données).")
+
 
 # =========================
 # Heuristique d’actions (sans IA)
 # =========================
-def heuristic_actions(df_q: pd.DataFrame, df_a: pd.DataFrame, lang: str) -> str:
+def heuristic_actions(df_q: pd.DataFrame, df_a: pd.DataFrame, prio_df: pd.DataFrame, lang: str) -> str:
+    # S'assurer que prio_df n'est pas vide
+    if prio_df.empty:
+        return "- —"
+
     out = []
+    # Jointure pour avoir score et poids ensemble
     merged = df_a.merge(df_q[["domain","question","weight"]], on=["domain","question"], how="left")
     
-    # Priorise les domaines avec le score le plus bas
+    # Prioriser par l'ordre de prio_df
     prio_domains = prio_df["domain"].tolist()
-    
-    merged_sorted = merged.set_index('domain').loc[prio_domains].reset_index()
-    
-    # Prend les 5 actions les plus faibles (level 1) parmi les domaines prioritaires
-    wins = merged_sorted[merged_sorted["level"] <= 2].sort_values("level", ascending=True).head(5)
+
+    # Créer une colonne 'sort_order' basée sur l'ordre de prio_domains
+    domain_order = {domain: i for i, domain in enumerate(prio_domains)}
+    merged['sort_order'] = merged['domain'].map(domain_order)
+
+    # Trier par ordre de priorité de domaine, puis par niveau bas, puis par poids élevé
+    merged_sorted = merged.sort_values(['sort_order', 'level', 'weight'], ascending=[True, True, False])
+
+    # Prend les 5 actions les plus faibles (level 1 ou 2)
+    wins = merged_sorted[merged_sorted["level"] <= 2].head(5)
     
     for _, r in wins.iterrows():
-        out.append(T["quick_win_line"].format(domain=r["domain"], question=r["question"], level=r["level"]))
+        # Vérification si les clés existent avant de formater
+        if pd.notna(r.get("domain")) and pd.notna(r.get("question")) and pd.notna(r.get("level")):
+            out.append(T["quick_win_line"].format(domain=r["domain"], question=r["question"], level=int(r["level"])))
+    
     return "\n".join(out) if out else "- —"
 
-quick_wins = heuristic_actions(Q, A, cur_lang)
+quick_wins = heuristic_actions(Q, A, prio_df, cur_lang)
+
 
 # =========================
 # IA (optionnelle)
 # =========================
 def ai_summary_openai(api_key: str, model: str, prompt: str) -> str:
+    # Vérification si la clé API est fournie
+    if not api_key:
+         return "(Clé API OpenAI manquante)"
     try:
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
@@ -558,17 +604,34 @@ def ai_summary_openai(api_key: str, model: str, prompt: str) -> str:
             temperature=0.5,
         )
         return resp.choices[0].message.content.strip()
-    except Exception as e:
-        return f"(AI agent unavailable: {e})"
+    # Gestion spécifique de l'erreur d'authentification
+    except ImportError:
+         return "(Bibliothèque OpenAI non installée. Exécutez : pip install openai)"
+    except Exception as e: # Catch plus large pour autres erreurs
+        # Tentative d'extraire des informations plus utiles de l'erreur
+        error_message = str(e)
+        if "Incorrect API key" in error_message:
+             return "(Erreur d'authentification OpenAI: Clé API incorrecte ou invalide)"
+        elif "quota" in error_message.lower():
+             return "(Erreur OpenAI: Quota dépassé ou problème de facturation)"
+        elif "model_not_found" in error_message:
+             return f"(Erreur OpenAI: Modèle '{model}' non trouvé ou accès non autorisé)"
+        else:
+            return f"(Erreur Agent IA: {error_message})" # Message d'erreur générique mais informatif
+
 
 if not use_ai or not api_key:
     st.info(T["ai_mode_manual"])
 
+# Contexte pour l'IA (s'assurer que domain_scores et prio_df ne sont pas vides)
+domain_scores_str = str(domain_scores) if domain_scores else "N/A"
+prio_order_str = ', '.join(prio_df['domain'].tolist()) if not prio_df.empty else "N/A"
+
 base_context = f"""
 CONTEXT:
 - Overall Score: {global_score:.1f}/100
-- Domain Scores: {domain_scores}
-- Priority Order (Domains to fix first): {', '.join(prio_df['domain'].tolist())}
+- Domain Scores: {domain_scores_str}
+- Priority Order (Domains to fix first): {prio_order_str}
 - Top Quick Wins (based on low score):
 {quick_wins}
 """
@@ -582,19 +645,21 @@ if use_ai and api_key:
         sum_prompt = f"""Rédige une synthèse exécutive (3 bullets "Forces", 3 bullets "Risques") pour un COMEX. Ton factuel, direct, sans jargon.
 {base_context}"""
         map_prompt = f"""Rédige une feuille de route stratégique (format Markdown) basée sur le diagnostic.
-- **Plan 90 Jours (Quick Wins):** 3 actions concrètes (SMART) pour stopper "l'hémorragie" sur les domaines prioritaires.
+- **Plan 90 Jours (Quick Wins):** 3 actions concrètes (SMART) pour stopper "l'hémorragie" sur les domaines prioritaires listés.
 - **Plan 6 Mois (Structuration):** 3 actions pour bâtir les fondations (gouvernance, outils) sur les domaines faibles.
 - **Plan 12 Mois (Scale):** 2 actions pour industrialiser et atteindre le niveau 'Leader'.
-Pour chaque action : [Objectif] - [Livrable clé] - [Impact (Faible/Moyen/Élevé)].
+Pour chaque action : [Objectif Clair] - [Livrable Clé] - [Impact Métier (Faible/Moyen/Élevé)].
+Sois spécifique et actionnable.
 {base_context}"""
     else:
         sum_prompt = f"""Write an executive summary (3 'Strengths' bullets, 3 'Risks' bullets) for a C-level meeting. Factual, direct, no jargon.
 {base_context}"""
         map_prompt = f"""Write a strategic roadmap (Markdown format) based on the diagnosis.
-- **90-Day Plan (Quick Wins):** 3 concrete SMART actions to stop the "bleeding" in priority domains.
+- **90-Day Plan (Quick Wins):** 3 concrete SMART actions to stop the "bleeding" in the listed priority domains.
 - **6-Month Plan (Foundation):** 3 actions to build the foundation (governance, tooling) in weak areas.
 - **12-Month Plan (Scale):** 2 actions to industrialize and reach the 'Leader' level.
-For each action: [Objective] - [Key Deliverable] - [Impact (Low/Med/High)].
+For each action: [Clear Objective] - [Key Deliverable] - [Business Impact (Low/Med/High)].
+Be specific and actionable.
 {base_context}"""
 
     with st.spinner("🚀 L'Agent IA rédige la synthèse..."):
@@ -607,16 +672,16 @@ For each action: [Objective] - [Key Deliverable] - [Impact (Low/Med/High)].
 # =========================
 st.markdown(f"### {T['summary_title']}")
 
-if not summary_text:
-    strengths = ", ".join([d for d,s in domain_scores.items() if s>=70]) or "—"
-    risks = ", ".join([d for d,s in domain_scores.items() if s<60]) or "—"
-    summary_text = T["fallback_summary"].format(
-        score=global_score, strengths=T["default_strengths"], risks=T["default_risks"],
-        s_list=strengths, r_list=risks
-    )
+# Utiliser le texte généré par l'IA s'il existe, sinon fallback
+final_summary = summary_text if summary_text else T["fallback_summary"].format(
+    score=global_score,
+    strengths=T["default_strengths"],
+    risks=T["default_risks"],
+    s_list=", ".join([d for d,s in domain_scores.items() if s>=70]) or "—",
+    r_list=", ".join([d for d,s in domain_scores.items() if s<60]) or "—"
+)
 
-if not roadmap_text:
-    roadmap_text = f"""**{T['fallback_roadmap_title']}**
+final_roadmap = roadmap_text if roadmap_text else f"""**{T['fallback_roadmap_title']}**
 
 {T['fallback_roadmap_90']}
 {quick_wins}
@@ -632,6 +697,7 @@ if not roadmap_text:
 """
 
 # Formatage du rapport final
+# Ajout de blocs ``` pour les scores et la priorisation pour un meilleur affichage Markdown
 report_md = f"""# 🚀 Rapport de Transformation Stratégique
 
 **Score Global de Maturité:** {global_score:.1f}/100
@@ -639,3 +705,4 @@ report_md = f"""# 🚀 Rapport de Transformation Stratégique
 ---
 
 ## 📊 Scores par Domaine
+
