@@ -1,12 +1,20 @@
+# Core Streamlit app
 streamlit==1.37.1
 pandas==2.2.2
 numpy==1.26.4
 plotly==5.23.0
 openpyxl==3.1.5
+
+# OpenAI (nouveau SDK 1.x)
 openai==1.51.0
-# PDF (optionnel : choisis l’un des deux blocs)
-# weasyprint==62.3
-# tinycss2==1.3.0
-# cssselect2==0.7.0
-# OU
+
+# Optional: PDF export (choose one set below)
+
+# --- Option A: WeasyPrint (recommandé) ---
+weasyprint==62.3
+tinycss2==1.3.0
+cssselect2==0.7.0
+
+# --- Option B: pdfkit (alternative) ---
 # pdfkit==1.0.0
+# wkhtmltopdf must be installed on the system
